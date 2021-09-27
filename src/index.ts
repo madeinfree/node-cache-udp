@@ -13,30 +13,35 @@ const OK = `OK\r\n`
 const ERR = `ERR\r\n`
 // number
 const ZERO = `0\r\n`
+// konstant
+const kServer = Symbol('kServer')
+const kCache = Symbol('kCache')
+const kDH = Symbol('kDH')
+const kSecret = Symbol('kSecret')
 
 class NodeCacheUDP extends EventEmitter {
-  server: Socket | null
-  cache: {
+  [kServer]: Socket | null;
+  [kCache]: {
     [key: string]: {
       value: string
       length: number
     }
-  }
-  dh: DiffieHellman
-  secret: Buffer
+  };
+  [kDH]: DiffieHellman;
+  [kSecret]: Buffer
   constructor() {
     super()
 
-    this.server = null
-    this.cache = {}
+    this[kServer] = null
+    this[kCache] = {}
 
-    this.dh = null
-    this.secret = null
+    this[kDH] = null
+    this[kSecret] = null
 
     this.on('response', this.handleServerResponse)
   }
   public createServer(callback: (address: string, port: number) => void) {
-    if (this.server instanceof Socket) {
+    if (this[kServer] instanceof Socket) {
       console.warn('server has only one instance.')
     } else {
       const server = dgram.createSocket('udp4')
@@ -57,7 +62,7 @@ class NodeCacheUDP extends EventEmitter {
           const [encrypted, iv, tag] = String(buffer).split(' ')
           const decipher = createDecipheriv(
             'aes-192-gcm',
-            this.secret,
+            this[kSecret],
             Buffer.from(iv, 'base64')
           )
           decipher.setAuthTag(Buffer.from(tag, 'base64'))
@@ -91,27 +96,29 @@ class NodeCacheUDP extends EventEmitter {
             }
             if (phase === 2) {
               const [, cKey] = value.split(' ')
-              this.secret = this.dh.computeSecret(Buffer.from(cKey, 'base64'))
+              this[kSecret] = this[kDH].computeSecret(
+                Buffer.from(cKey, 'base64')
+              )
               const res = 'HandShake Success'
               responseText = OK + res.length + '\r\n' + res
             }
             break
           case 'SET':
-            this.cache[key] = {
+            this[kCache][key] = {
               value,
               length: value.length,
             }
             responseText = OK + ZERO + 'NULL'
             break
           case 'DEL':
-            delete this.cache[key]
+            delete this[kCache][key]
             responseText = OK + ZERO + 'NULL'
             break
           case 'GET':
             responseText =
               OK +
-              (this.cache[key]
-                ? `${this.cache[key].length}\r\n${this.cache[key].value}`
+              (this[kCache][key]
+                ? `${this[kCache][key].length}\r\n${this[kCache][key].value}`
                 : ZERO + 'NULL')
             break
           case 'PING':
@@ -125,22 +132,22 @@ class NodeCacheUDP extends EventEmitter {
 
         this.emit('response', remoteInfo, responseText)
       })
-      this.server = server
+      this[kServer] = server
     }
   }
   public bind(port: number = 10923) {
-    if (this.server) {
-      this.server.bind(port || 10923)
+    if (this[kServer]) {
+      this[kServer].bind(port || 10923)
     } else {
       throw Error('Node Cache UDP Error: udp server does not create instance.')
     }
   }
   private handleHandShakeInit() {
-    this.dh = createDiffieHellman(192)
-    const key = this.dh.generateKeys()
+    this[kDH] = createDiffieHellman(192)
+    const key = this[kDH].generateKeys()
     return {
-      DHprime: this.dh.getPrime(),
-      DHgenerator: this.dh.getGenerator(),
+      DHprime: this[kDH].getPrime(),
+      DHgenerator: this[kDH].getGenerator(),
       DHKey: key,
     }
   }

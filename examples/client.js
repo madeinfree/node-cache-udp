@@ -138,13 +138,5 @@ class NodeCacheClient {
 const client = new NodeCacheClient()
 
 setTimeout(() => {
-  client.set(
-    'stackoverflow',
-    `When trying to encrypt and decrypt a file through a Cipher/Decipher stream I always encounter the following error: Unsupported state or unable to authenticate data.
-    
-    This is the code (comparison between the stream and the not-stream versions):`
-  )
+  client.ping()
 }, 1000)
-setTimeout(() => {
-  client.get('stackoverflow')
-}, 2000)
