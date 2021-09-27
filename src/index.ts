@@ -16,8 +16,25 @@ const ZERO = `0\r\n`
 // konstant
 const kServer = Symbol('kServer')
 const kCache = Symbol('kCache')
-const kDH = Symbol('kDH')
-const kSecret = Symbol('kSecret')
+const kConnections = Symbol('kConnections')
+
+/**
+ * record connection from client, ttl is default 72000ms
+ * key is IP
+ */
+interface HandShakeInfo {
+  secret: Buffer
+  dh: DiffieHellman
+  phase: number
+}
+interface Connection {
+  rInfo: RemoteInfo
+  sInfo: HandShakeInfo
+  ttl: number
+}
+interface Connections {
+  [key: string]: Connection
+}
 
 class NodeCacheUDP extends EventEmitter {
   [kServer]: Socket | null;
@@ -27,16 +44,14 @@ class NodeCacheUDP extends EventEmitter {
       length: number
     }
   };
-  [kDH]: DiffieHellman;
-  [kSecret]: Buffer
+  [kConnections]: Connections
   constructor() {
     super()
 
     this[kServer] = null
     this[kCache] = {}
 
-    this[kDH] = null
-    this[kSecret] = null
+    this[kConnections] = {}
 
     this.on('response', this.handleServerResponse)
   }
@@ -55,14 +70,18 @@ class NodeCacheUDP extends EventEmitter {
         }
       })
       server.on('message', (buffer, remoteInfo) => {
+        let port = remoteInfo.port
+        let address = remoteInfo.address
+        let connect = this[kConnections][address + ':' + port]
+
         const text = buffer.toString('utf-8')
         let [op, key, value] = text.split('\r\n')
 
-        if (op !== 'HandShake') {
+        if (op !== 'HandShake' && connect) {
           const [encrypted, iv, tag] = String(buffer).split(' ')
           const decipher = createDecipheriv(
             'aes-192-gcm',
-            this[kSecret],
+            connect.sInfo.secret,
             Buffer.from(iv, 'base64')
           )
           decipher.setAuthTag(Buffer.from(tag, 'base64'))
@@ -72,6 +91,19 @@ class NodeCacheUDP extends EventEmitter {
           op = s[0]
           key = s[1]
           value = s[2]
+        } else {
+          // record new connection
+          if (!connect) {
+            connect = this[kConnections][address + ':' + port] = {
+              rInfo: remoteInfo,
+              sInfo: {
+                secret: null,
+                dh: null,
+                phase: 1,
+              },
+              ttl: 72000,
+            }
+          }
         }
 
         let responseText = ''
@@ -83,8 +115,8 @@ class NodeCacheUDP extends EventEmitter {
               break
             }
             const phase = parseInt(value, 10)
-            if (phase === 1) {
-              const dh = this.handleHandShakeInit()
+            if (phase === 1 && connect.sInfo.phase === 1) {
+              const dh = this.handleHandShakeInit(connect)
               const res =
                 dh.DHprime.toString('base64') +
                 ' ' +
@@ -92,11 +124,14 @@ class NodeCacheUDP extends EventEmitter {
                 ' ' +
                 dh.DHKey.toString('base64')
               responseText = OK + res.length + '\r\n' + res
+              this[kConnections][address + ':' + port].sInfo.phase++
               break
             }
-            if (phase === 2) {
+
+            if (phase === 2 && connect.sInfo.phase === 2) {
+              console.log('phase', this[kConnections][address + ':' + port])
               const [, cKey] = value.split(' ')
-              this[kSecret] = this[kDH].computeSecret(
+              connect.sInfo.secret = connect.sInfo.dh.computeSecret(
                 Buffer.from(cKey, 'base64')
               )
               const res = 'HandShake Success'
@@ -130,7 +165,7 @@ class NodeCacheUDP extends EventEmitter {
             break
         }
 
-        this.emit('response', remoteInfo, responseText)
+        this.emit('response', connect.rInfo, responseText)
       })
       this[kServer] = server
     }
@@ -142,12 +177,12 @@ class NodeCacheUDP extends EventEmitter {
       throw Error('Node Cache UDP Error: udp server does not create instance.')
     }
   }
-  private handleHandShakeInit() {
-    this[kDH] = createDiffieHellman(192)
-    const key = this[kDH].generateKeys()
+  private handleHandShakeInit(connect: Connection) {
+    connect.sInfo.dh = createDiffieHellman(192)
+    const key = connect.sInfo.dh.generateKeys()
     return {
-      DHprime: this[kDH].getPrime(),
-      DHgenerator: this[kDH].getGenerator(),
+      DHprime: connect.sInfo.dh.getPrime(),
+      DHgenerator: connect.sInfo.dh.getGenerator(),
       DHKey: key,
     }
   }

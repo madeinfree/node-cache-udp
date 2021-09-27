@@ -139,4 +139,4 @@ const client = new NodeCacheClient()
 
 setTimeout(() => {
   client.ping()
-}, 1000)
+}, 2000)
