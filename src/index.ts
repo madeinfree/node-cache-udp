@@ -129,7 +129,6 @@ class NodeCacheUDP extends EventEmitter {
             }
 
             if (phase === 2 && connect.sInfo.phase === 2) {
-              console.log('phase', this[kConnections][address + ':' + port])
               const [, cKey] = value.split(' ')
               connect.sInfo.secret = connect.sInfo.dh.computeSecret(
                 Buffer.from(cKey, 'base64')
@@ -158,6 +157,9 @@ class NodeCacheUDP extends EventEmitter {
             break
           case 'PING':
             responseText = OK + PONG
+            break
+          case 'CLOSE':
+            delete this[kConnections][address + ':' + port]
             break
           default:
             responseText =

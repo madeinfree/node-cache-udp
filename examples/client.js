@@ -75,6 +75,27 @@ class NodeCacheClient {
       this.client = client
 
       this.handShakeInit()
+
+      process.on('SIGINT', () => {
+        if (this.client && this.dhPhase === 2) {
+          const { encrypted, iv, tag } = encryptPlainText(
+            this.secretKey,
+            'CLOSE',
+            '',
+            ''
+          )
+          this.sendRequest(
+            encrypted +
+              ' ' +
+              iv.toString('base64') +
+              ' ' +
+              tag.toString('base64')
+          )
+          setTimeout(() => {
+            this.client.close()
+          }, 1000)
+        }
+      })
     }
   }
   handShakeInit() {
@@ -127,11 +148,22 @@ class NodeCacheClient {
       encrypted + ' ' + iv.toString('base64') + ' ' + tag.toString('base64')
     )
   }
+  close() {
+    const { encrypted, iv, tag } = encryptPlainText(
+      this.secretKey,
+      'CLOSE',
+      '',
+      ''
+    )
+    this.sendRequest(
+      encrypted + ' ' + iv.toString('base64') + ' ' + tag.toString('base64')
+    )
+    setTimeout(() => {
+      this.client.close()
+    }, 1000)
+  }
   sendRequest(opText) {
     this.client.send(opText, this.port, this.address)
-  }
-  close() {
-    this.client.close()
   }
 }
 
