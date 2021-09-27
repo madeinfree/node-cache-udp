@@ -1,0 +1,28 @@
+{
+  "name": "node-cache-udp",
+  "version": "0.0.1",
+  "description": "Pure node cache server build on udp",
+  "engines": {
+    "node": ">= 14.0.0"
+  },
+  "main": "./build/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "cache",
+    "memory cache",
+    "udp"
+  ],
+  "author": {
+    "email": "sal95610@gmai.com",
+    "name": "Whien LIU",
+    "url": "https://github.com/madeinfree"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^16.9.6",
+    "@yosgo/tsconfig": "^0.0.3"
+  }
+}
