@@ -1,18 +1,78 @@
 import dgram, { RemoteInfo, Socket } from 'dgram'
+import crypto from 'crypto'
 import EventEmitter from 'events'
-import { createDiffieHellman, DiffieHellman, createDecipheriv } from 'crypto'
+import { createDecipheriv, createECDH, ECDH } from 'crypto'
+
+interface HandShakeInfo {
+  secret: string
+  dh: ECDH
+  phase: number
+}
+interface LiveInfo {
+  ttl: number
+  lastTS: number
+}
+interface Connection {
+  rInfo: RemoteInfo
+  sInfo: HandShakeInfo
+  lInfo: LiveInfo
+}
+interface Connections {
+  [key: string]: Connection
+}
+
+function encryptPlainText(secretKey: string, msg: string) {
+  const iv = crypto.randomBytes(16)
+
+  const cipher = crypto.createCipheriv(
+    'aes-256-gcm',
+    secretKey.slice(0, 32),
+    iv
+  )
+  let encrypted = cipher.update(msg, 'utf8', 'hex')
+  encrypted += cipher.final('hex')
+  const tag = cipher.getAuthTag()
+
+  return encrypted + ' ' + iv.toString('base64') + ' ' + tag.toString('base64')
+}
+function decryptData(
+  sInfo: HandShakeInfo,
+  iv: string,
+  tag: string,
+  data: string
+) {
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    sInfo.secret.slice(0, 32),
+    Buffer.from(iv, 'base64')
+  )
+  decipher.setAuthTag(Buffer.from(tag, 'base64'))
+  let decrypted = decipher.update(data, 'hex', 'utf-8')
+  decrypted += decipher.final('utf-8')
+  return decrypted
+}
 
 /**
  * Constants
  */
 
+//
+const DELIMITER = '\r\n'
+// op
+const HANDSHAKE = `HandShake`
+const SET = 'SET'
+const DEL = 'DEL'
+const GET = 'GET'
+const PING = 'PING'
+const CLOSE = 'CLOSE'
 // PING
-const PONG = `4\r\nPONG`
+const PONG = '4' + DELIMITER + 'PONG'
 // status
-const OK = `OK\r\n`
-const ERR = `ERR\r\n`
+const OK = 'OK' + DELIMITER
+const ERR = 'ERR' + DELIMITER
 // number
-const ZERO = `0\r\n`
+const ZERO = '0' + DELIMITER
+
 // konstant
 const kServer = Symbol('kServer')
 const kCache = Symbol('kCache')
@@ -22,19 +82,6 @@ const kConnections = Symbol('kConnections')
  * record connection from client, ttl is default 72000ms
  * key is IP
  */
-interface HandShakeInfo {
-  secret: Buffer
-  dh: DiffieHellman
-  phase: number
-}
-interface Connection {
-  rInfo: RemoteInfo
-  sInfo: HandShakeInfo
-  ttl: number
-}
-interface Connections {
-  [key: string]: Connection
-}
 
 class NodeCacheUDP extends EventEmitter {
   [kServer]: Socket | null;
@@ -66,7 +113,11 @@ class NodeCacheUDP extends EventEmitter {
         if (callback) {
           callback(address.address, address.port)
         } else {
-          console.log('server listening %s:%s', address.address, address.port)
+          console.log(
+            '[NCU info] server listening %s:%s',
+            address.address,
+            address.port
+          )
         }
       })
       server.on('message', (buffer, remoteInfo) => {
@@ -75,19 +126,16 @@ class NodeCacheUDP extends EventEmitter {
         let connect = this[kConnections][address + ':' + port]
 
         const text = buffer.toString('utf-8')
-        let [op, key, value] = text.split('\r\n')
+        let [op, key, value] = text.split(DELIMITER)
 
-        if (op !== 'HandShake' && connect) {
+        if (op !== HANDSHAKE && !connect) {
+          return
+        }
+
+        if (op !== HANDSHAKE && connect) {
           const [encrypted, iv, tag] = String(buffer).split(' ')
-          const decipher = createDecipheriv(
-            'aes-192-gcm',
-            connect.sInfo.secret,
-            Buffer.from(iv, 'base64')
-          )
-          decipher.setAuthTag(Buffer.from(tag, 'base64'))
-          let decrypted = decipher.update(encrypted, 'hex', 'utf-8')
-          decrypted += decipher.final('utf-8')
-          const s = decrypted.split('\r\n')
+          const decrypted = decryptData(connect.sInfo, iv, tag, encrypted)
+          const s = decrypted.split(DELIMITER)
           op = s[0]
           key = s[1]
           value = s[2]
@@ -101,72 +149,103 @@ class NodeCacheUDP extends EventEmitter {
                 dh: null,
                 phase: 1,
               },
-              ttl: 72000,
+              lInfo: {
+                ttl: 72000,
+                lastTS: new Date().getTime(),
+              },
             }
           }
         }
 
         let responseText = ''
         switch (op) {
-          case 'HandShake':
-            if (key !== 'phase') {
-              const errorMsg = `HandShake \`${key}\` invalid, do you mean \`phase\` ?.`
-              responseText = ERR + errorMsg.length + '\r\n' + errorMsg
-              break
-            }
-            const phase = parseInt(value, 10)
-            if (phase === 1 && connect.sInfo.phase === 1) {
-              const dh = this.handleHandShakeInit(connect)
-              const res =
-                dh.DHprime.toString('base64') +
-                ' ' +
-                dh.DHgenerator.toString('base64') +
-                ' ' +
-                dh.DHKey.toString('base64')
-              responseText = OK + res.length + '\r\n' + res
-              this[kConnections][address + ':' + port].sInfo.phase++
-              break
-            }
+          case HANDSHAKE:
+            {
+              if (key !== 'phase') {
+                const errorMsg = `HandShake \`${key}\` invalid, do you mean \`phase\` ?.`
+                responseText = ERR + errorMsg.length + DELIMITER + errorMsg
+                break
+              }
+              const phase = parseInt(value, 10)
+              if (phase === 1 && connect.sInfo.phase === 1) {
+                const dh = this.handleHandShakeInit(connect)
+                const res = dh.DHKey.toString('base64')
+                responseText = OK + res.length + DELIMITER + res
+                this[kConnections][address + ':' + port].sInfo.phase++
+                break
+              }
 
-            if (phase === 2 && connect.sInfo.phase === 2) {
-              const [, cKey] = value.split(' ')
-              connect.sInfo.secret = connect.sInfo.dh.computeSecret(
-                Buffer.from(cKey, 'base64')
-              )
-              const res = 'HandShake Success'
-              responseText = OK + res.length + '\r\n' + res
+              if (phase === 2 && connect.sInfo.phase === 2) {
+                const [, cKey] = value.split(' ')
+                connect.sInfo.secret = crypto
+                  .createHash('sha256')
+                  .update(
+                    connect.sInfo.dh.computeSecret(Buffer.from(cKey, 'base64'))
+                  )
+                  .digest('hex')
+                const res = 'HandShake Success'
+                responseText = OK + res.length + DELIMITER + res
+              }
             }
             break
-          case 'SET':
+          case SET: {
             this[kCache][key] = {
               value,
               length: value.length,
             }
-            responseText = OK + ZERO + 'NULL'
+            responseText = encryptPlainText(
+              connect.sInfo.secret,
+              OK + ZERO + 'NULL'
+            )
+
             break
-          case 'DEL':
+          }
+          case DEL: {
             delete this[kCache][key]
-            responseText = OK + ZERO + 'NULL'
+            responseText = encryptPlainText(
+              connect.sInfo.secret,
+              OK + ZERO + 'NULL'
+            )
+
             break
-          case 'GET':
-            responseText =
+          }
+          case GET: {
+            responseText = encryptPlainText(
+              connect.sInfo.secret,
               OK +
-              (this[kCache][key]
-                ? `${this[kCache][key].length}\r\n${this[kCache][key].value}`
-                : ZERO + 'NULL')
+                (this[kCache][key]
+                  ? this[kCache][key].length +
+                    DELIMITER +
+                    this[kCache][key].value
+                  : ZERO + 'NULL')
+            )
+
             break
-          case 'PING':
-            responseText = OK + PONG
+          }
+          case PING: {
+            responseText = encryptPlainText(connect.sInfo.secret, OK + PONG)
+
             break
-          case 'CLOSE':
+          }
+          case CLOSE: {
             delete this[kConnections][address + ':' + port]
+
             break
-          default:
-            responseText =
-              ERR + (21 + op.length) + '\r\n' + `\`${op}\` command not found.`
+          }
+          default: {
+            responseText = encryptPlainText(
+              connect.sInfo.secret,
+              ERR +
+                (21 + op.length) +
+                DELIMITER +
+                `\`${op}\` command not found.`
+            )
+
             break
+          }
         }
 
+        if (op === CLOSE) return
         this.emit('response', connect.rInfo, responseText)
       })
       this[kServer] = server
@@ -174,17 +253,18 @@ class NodeCacheUDP extends EventEmitter {
   }
   public bind(port: number = 10923) {
     if (this[kServer]) {
-      this[kServer].bind(port || 10923)
+      this[kServer].bind(port || 10923, () => {
+        this.ttlConnectionsChecker()
+        console.log('[NCU info] run ttl connection checker...')
+      })
     } else {
       throw Error('Node Cache UDP Error: udp server does not create instance.')
     }
   }
   private handleHandShakeInit(connect: Connection) {
-    connect.sInfo.dh = createDiffieHellman(192)
+    connect.sInfo.dh = createECDH('secp521r1')
     const key = connect.sInfo.dh.generateKeys()
     return {
-      DHprime: connect.sInfo.dh.getPrime(),
-      DHgenerator: connect.sInfo.dh.getGenerator(),
       DHKey: key,
     }
   }
@@ -192,12 +272,29 @@ class NodeCacheUDP extends EventEmitter {
     const { family } = remoteInfo
     if (family === 'IPv4') {
       const { port, address } = remoteInfo
-      const client = dgram.createSocket('udp4')
-      client.send(Buffer.from(msg), port, address)
+      if (this[kConnections][address + ':' + port]) {
+        const client = dgram.createSocket('udp4')
+        client.send(Buffer.from(msg), port, address)
+
+        this[kConnections][address + ':' + port].lInfo.lastTS =
+          new Date().getTime()
+      }
     }
   }
   private handleServerError(err: Error) {
     console.log('server error: \n%s', err.stack)
+  }
+  private ttlConnectionsChecker() {
+    setTimeout(() => {
+      for (let key in this[kConnections]) {
+        const diffTS =
+          new Date().getTime() - this[kConnections][key].lInfo.lastTS
+        if (diffTS > this[kConnections][key].lInfo.ttl) {
+          delete this[kConnections][key]
+        }
+      }
+      this.ttlConnectionsChecker()
+    }, 10000)
   }
 }
 
