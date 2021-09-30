@@ -1,8 +1,10 @@
-import dgram, { RemoteInfo, Socket } from 'dgram'
-import crypto from 'crypto'
-import EventEmitter from 'events'
-import { createDecipheriv, createECDH, ECDH } from 'crypto'
+import dgram from 'dgram'
 
+import crypto, { createDecipheriv, createECDH } from 'crypto'
+import EventEmitter from 'events'
+
+import type { ECDH } from 'crypto'
+import type { RemoteInfo } from 'dgram'
 interface HandShakeInfo {
   secret: string
   dh: ECDH
@@ -84,7 +86,7 @@ const kConnections = Symbol('kConnections')
  */
 
 class NodeCacheUDP extends EventEmitter {
-  [kServer]: Socket | null;
+  [kServer]: dgram.Socket | null;
   [kCache]: {
     [key: string]: {
       value: string
@@ -103,7 +105,7 @@ class NodeCacheUDP extends EventEmitter {
     this.on('response', this.handleServerResponse)
   }
   public createServer(callback: (address: string, port: number) => void) {
-    if (this[kServer] instanceof Socket) {
+    if (this[kServer] instanceof dgram.Socket) {
       console.warn('server has only one instance.')
     } else {
       const server = dgram.createSocket('udp4')
