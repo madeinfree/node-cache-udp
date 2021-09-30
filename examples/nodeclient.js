@@ -67,7 +67,7 @@ class NodeCacheClient {
     }, this.timeout)
   }
   handShakeInit() {
-    this.sendRequest(`HandShake\r\nphase\r\n1`)
+    this.sendRequest(Buffer.from([0x1]))
   }
   handleHandShake(resolve, buffer) {
     let [, , msg] = buffer.toString().split('\r\n')
@@ -100,7 +100,9 @@ class NodeCacheClient {
     }
   }
   handShakeLast() {
-    this.sendRequest(`HandShake\r\nphase\r\n2 ${this.cKey.toString('base64')}`)
+    this.sendRequest(
+      Buffer.concat([Buffer.from([0x2]), Buffer.from(this.cKey)])
+    )
   }
   handleListening() {
     const cInfo = this.address()
@@ -124,6 +126,9 @@ class NodeCacheClient {
       msg = s[2]
     }
     if (status === 'OK' && this.dhPhase === 2) {
+      if (msg === 'PONG') {
+        console.log('PONG')
+      }
       resolve(msg)
     } else if (status === 'ERR') {
       console.log('[NCUC error] length =>', length, 'msg =>', msg)
@@ -138,7 +143,7 @@ class NodeCacheClient {
         ''
       )
       this.sendRequest(
-        encrypted + ' ' + iv.toString('base64') + ' ' + tag.toString('base64')
+        Buffer.concat([Buffer.from([0x82]), iv, tag, Buffer.from(encrypted)])
       )
       this.client.once('message', this.handleResponse.bind(this, resolve))
     })
@@ -152,7 +157,7 @@ class NodeCacheClient {
         value
       )
       this.sendRequest(
-        encrypted + ' ' + iv.toString('base64') + ' ' + tag.toString('base64')
+        Buffer.concat([Buffer.from([0x82]), iv, tag, Buffer.from(encrypted)])
       )
       this.client.once('message', this.handleResponse.bind(this, resolve))
     })
@@ -166,22 +171,24 @@ class NodeCacheClient {
         ''
       )
       this.sendRequest(
-        encrypted + ' ' + iv.toString('base64') + ' ' + tag.toString('base64')
+        Buffer.concat([Buffer.from([0x82]), iv, tag, Buffer.from(encrypted)])
       )
       this.client.once('message', this.handleResponse.bind(this, resolve))
     })
   }
   ping() {
-    const { encrypted, iv, tag } = encryptPlainText(
-      this.secretKey,
-      'PING',
-      '',
-      ''
-    )
-    this.sendRequest(
-      encrypted + ' ' + iv.toString('base64') + ' ' + tag.toString('base64')
-    )
-    this.client.once('message', this.handleResponse.bind(this, resolve))
+    return new Promise((resolve) => {
+      const { encrypted, iv, tag } = encryptPlainText(
+        this.secretKey,
+        'PING',
+        '',
+        ''
+      )
+      this.sendRequest(
+        Buffer.concat([Buffer.from([0x82]), iv, tag, Buffer.from(encrypted)])
+      )
+      this.client.once('message', this.handleResponse.bind(this, resolve))
+    })
   }
   close() {
     const { encrypted, iv, tag } = encryptPlainText(
@@ -191,7 +198,7 @@ class NodeCacheClient {
       ''
     )
     this.sendRequest(
-      encrypted + ' ' + iv.toString('base64') + ' ' + tag.toString('base64')
+      Buffer.concat([Buffer.from([0x82]), iv, tag, Buffer.from(encrypted)])
     )
     setTimeout(() => {
       this.client.close()

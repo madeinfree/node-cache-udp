@@ -40,20 +40,25 @@ function encryptPlainText(secretKey: string, msg: string) {
 }
 function decryptData(
   sInfo: HandShakeInfo,
-  iv: string,
-  tag: string,
+  iv: Buffer,
+  tag: Buffer,
   data: string
 ) {
   const decipher = createDecipheriv(
     'aes-256-gcm',
     sInfo.secret.slice(0, 32),
-    Buffer.from(iv, 'base64')
+    iv
   )
-  decipher.setAuthTag(Buffer.from(tag, 'base64'))
+  decipher.setAuthTag(tag)
   let decrypted = decipher.update(data, 'hex', 'utf-8')
   decrypted += decipher.final('utf-8')
   return decrypted
 }
+
+// Buffer
+// 1 byte [00000001] handeshake
+// 1 byte [00000000] iv length
+// 1 byte [00000000] auth tag length
 
 /**
  * Constants
@@ -127,37 +132,37 @@ class NodeCacheUDP extends EventEmitter {
         let port = remoteInfo.port
         let address = remoteInfo.address
         let connect = this[kConnections][address + ':' + port]
+        let op, key, value
 
-        const text = buffer.toString('utf-8')
-        let [op, key, value] = text.split(DELIMITER)
-
-        if (op !== HANDSHAKE && !connect) {
-          return
+        const isHandShaked = (buffer[0] & 0x80) > 0
+        if (!isHandShaked) {
+          op = HANDSHAKE
         }
 
-        if (op !== HANDSHAKE && connect) {
-          const [encrypted, iv, tag] = String(buffer).split(' ')
+        if (isHandShaked && connect) {
+          const iv = buffer.slice(1, 17)
+          const tag = buffer.slice(17, 33)
+          const encrypted = buffer.slice(33).toString()
           const decrypted = decryptData(connect.sInfo, iv, tag, encrypted)
           const s = decrypted.split(DELIMITER)
           op = s[0]
           key = s[1]
           value = s[2]
-        } else {
+        }
+        if (!isHandShaked && !connect) {
           // record new connection
-          if (!connect) {
-            connect = this[kConnections][address + ':' + port] = {
-              rInfo: remoteInfo,
-              sInfo: {
-                secret: null,
-                dh: null,
-                phase: 1,
-              },
-              lInfo: {
-                socket: null,
-                ttl: 72000,
-                lastTS: new Date().getTime(),
-              },
-            }
+          connect = this[kConnections][address + ':' + port] = {
+            rInfo: remoteInfo,
+            sInfo: {
+              secret: null,
+              dh: null,
+              phase: 1,
+            },
+            lInfo: {
+              socket: null,
+              ttl: 72000,
+              lastTS: new Date().getTime(),
+            },
           }
         }
 
@@ -165,27 +170,18 @@ class NodeCacheUDP extends EventEmitter {
         switch (op) {
           case HANDSHAKE:
             {
-              if (key !== 'phase') {
-                const errorMsg = `HandShake \`${key}\` invalid, do you mean \`phase\` ?.`
-                responseText = ERR + errorMsg.length + DELIMITER + errorMsg
-                break
-              }
-              const phase = parseInt(value, 10)
+              const phase = buffer[0] & 0x3
               if (phase === 1 && connect.sInfo.phase === 1) {
                 const dh = this.handleHandShakeInit(connect)
                 const res = dh.DHKey.toString('base64')
                 responseText = OK + res.length + DELIMITER + res
                 this[kConnections][address + ':' + port].sInfo.phase++
-                break
               }
-
               if (phase === 2 && connect.sInfo.phase === 2) {
-                const [, cKey] = value.split(' ')
+                const cKey = buffer.slice(1)
                 connect.sInfo.secret = crypto
                   .createHash('sha256')
-                  .update(
-                    connect.sInfo.dh.computeSecret(Buffer.from(cKey, 'base64'))
-                  )
+                  .update(connect.sInfo.dh.computeSecret(cKey))
                   .digest('hex')
                 const res = 'HandShake Success'
                 responseText = OK + res.length + DELIMITER + res

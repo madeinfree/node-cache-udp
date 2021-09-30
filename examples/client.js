@@ -13,6 +13,7 @@ async function run() {
   await client.set('CACHE', 'SWAP2')
   const sss = await client.get('CACHE')
   console.log(sss)
+  client.close()
 }
 
 run()
