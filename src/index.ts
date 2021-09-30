@@ -11,6 +11,7 @@ interface HandShakeInfo {
   phase: number
 }
 interface LiveInfo {
+  socket: dgram.Socket | null
   ttl: number
   lastTS: number
 }
@@ -152,6 +153,7 @@ class NodeCacheUDP extends EventEmitter {
                 phase: 1,
               },
               lInfo: {
+                socket: null,
                 ttl: 72000,
                 lastTS: new Date().getTime(),
               },
@@ -274,12 +276,14 @@ class NodeCacheUDP extends EventEmitter {
     const { family } = remoteInfo
     if (family === 'IPv4') {
       const { port, address } = remoteInfo
-      if (this[kConnections][address + ':' + port]) {
-        const client = dgram.createSocket('udp4')
-        client.send(Buffer.from(msg), port, address)
+      const client = this[kConnections][address + ':' + port]
+      if (client) {
+        if (!client.lInfo.socket) {
+          client.lInfo.socket = dgram.createSocket('udp4')
+        }
+        client.lInfo.socket.send(Buffer.from(msg), port, address)
 
-        this[kConnections][address + ':' + port].lInfo.lastTS =
-          new Date().getTime()
+        client.lInfo.lastTS = new Date().getTime()
       }
     }
   }
@@ -292,6 +296,7 @@ class NodeCacheUDP extends EventEmitter {
         const diffTS =
           new Date().getTime() - this[kConnections][key].lInfo.lastTS
         if (diffTS > this[kConnections][key].lInfo.ttl) {
+          this[kConnections][key].lInfo.socket.close()
           delete this[kConnections][key]
         }
       }
