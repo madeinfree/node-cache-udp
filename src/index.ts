@@ -58,10 +58,9 @@ function decryptData(
 /** 
   HandShake Flag 1 byte
   phase = 1 0x1 = 00000001
-  phase = 2 0x2 = 00000010
   handshake uncomplet = 0x00 = 00000000 
   handshake completed = 0x80 = 10000000
-  handshake completed(phase 2) = 0x82 = 10000010
+  handshake completed = 0x82 = 10000010
   
   aes-256-gcm cipher iv 16 bytes
   aes-256-gcm cipher tag 16 bytes
@@ -179,19 +178,16 @@ class NodeCacheUDP extends EventEmitter {
             {
               const phase = buffer[0] & 0x3
               if (phase === 1 && connect.sInfo.phase === 1) {
-                const dh = this.handleHandShakeInit(connect)
-                const res = dh.DHKey.toString('base64')
-                responseText = OK + res.length + DELIMITER + res
-                this[kConnections][address + ':' + port].sInfo.phase++
-              }
-              if (phase === 2 && connect.sInfo.phase === 2) {
-                const cKey = buffer.slice(1)
-                connect.sInfo.secret = crypto
+                const cHDKey = buffer.slice(1)
+                const dh = crypto.createECDH('secp521r1')
+                const sHDKey = dh.generateKeys()
+                this[kConnections][address + ':' + port].sInfo.secret = crypto
                   .createHash('sha256')
-                  .update(connect.sInfo.dh.computeSecret(cKey))
+                  .update(dh.computeSecret(cHDKey))
                   .digest('hex')
-                const res = 'HandShake Success'
-                responseText = OK + res.length + DELIMITER + res
+                responseText =
+                  OK + sHDKey.length + '\r\n' + sHDKey.toString('base64')
+                this[kConnections][address + ':' + port].sInfo.phase++
               }
             }
             break

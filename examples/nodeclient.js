@@ -1,18 +1,10 @@
 const dgram = require('dgram')
 const crypto = require('crypto')
 
-function base64ToBuffer(code) {
-  return Buffer.from(code, 'base64')
-}
-
-function encryptPlainText(secretKey, op, key, value) {
+function encryptPlainText(secret, op, key, value) {
   const iv = crypto.randomBytes(16)
 
-  const cipher = crypto.createCipheriv(
-    'aes-256-gcm',
-    secretKey.slice(0, 32),
-    iv
-  )
+  const cipher = crypto.createCipheriv('aes-256-gcm', secret.slice(0, 32), iv)
   let encrypted = cipher.update(op + key + value, 'utf8', 'hex')
   encrypted += cipher.final('hex')
   const tag = cipher.getAuthTag()
@@ -32,10 +24,11 @@ class NodeCacheClient {
     this.host = settings?.host ?? 'localhost'
     this.timeout = settings?.timeout ?? 10000
 
-    this.dhPhase = 0
+    this.dhPhase = 1
+    this.dh = null
     this.cKey = null
     this.sKey = null
-    this.secretKey = null
+    this.secret = null
   }
   createClient() {
     if (this.client instanceof dgram.Socket) {
@@ -67,32 +60,22 @@ class NodeCacheClient {
     }, this.timeout)
   }
   handShakeInit() {
-    this.sendRequest(Buffer.from([0x1]))
+    this.dh = crypto.createECDH('secp521r1')
+    const key = this.dh.generateKeys()
+    this.sendRequest(Buffer.concat([Buffer.from([0x1]), key]))
   }
   handleHandShake(resolve, buffer) {
-    let [, , msg] = buffer.toString().split('\r\n')
+    let [status, _, sHDKey] = buffer.toString().split('\r\n')
+    if (!status === 'OK') throw Error('[NCUC timeout] Handshake error')
     if (this.dhPhase <= 1) {
       switch (this.dhPhase) {
-        case 0:
-          const sKey = msg
-          const dh = crypto.createECDH('secp521r1')
-          this.sKey = sKey
-          this.cKey = dh.generateKeys()
-          this.secretKey = crypto
+        case 1:
+          this.secret = crypto
             .createHash('sha256')
-            .update(dh.computeSecret(base64ToBuffer(sKey)))
+            .update(this.dh.computeSecret(Buffer.from(sHDKey, 'base64')))
             .digest('hex')
 
-          this.handShakeLast()
-
           this.dhPhase++
-          break
-        case 1:
-          this.dhPhase++
-          this.client.removeListener(
-            'message',
-            this.handleHandShake.bind(this, resolve)
-          )
           return resolve(this)
         default:
           break
@@ -114,7 +97,7 @@ class NodeCacheClient {
       const [encrypted, iv, tag] = status.split(' ')
       const decipher = crypto.createDecipheriv(
         'aes-256-gcm',
-        this.secretKey.slice(0, 32),
+        this.secret.slice(0, 32),
         Buffer.from(iv, 'base64')
       )
       decipher.setAuthTag(Buffer.from(tag, 'base64'))
@@ -137,7 +120,7 @@ class NodeCacheClient {
   get(key) {
     return new Promise((resolve) => {
       const { encrypted, iv, tag } = encryptPlainText(
-        this.secretKey,
+        this.secret,
         'GET\r\n',
         key,
         ''
@@ -151,7 +134,7 @@ class NodeCacheClient {
   set(key, value) {
     return new Promise((resolve) => {
       const { encrypted, iv, tag } = encryptPlainText(
-        this.secretKey,
+        this.secret,
         'SET\r\n',
         key + '\r\n',
         value
@@ -165,7 +148,7 @@ class NodeCacheClient {
   del(key) {
     return new Promise((resolve) => {
       const { encrypted, iv, tag } = encryptPlainText(
-        this.secretKey,
+        this.secret,
         'DEL\r\n',
         key,
         ''
@@ -179,7 +162,7 @@ class NodeCacheClient {
   ping() {
     return new Promise((resolve) => {
       const { encrypted, iv, tag } = encryptPlainText(
-        this.secretKey,
+        this.secret,
         'PING',
         '',
         ''
@@ -192,7 +175,7 @@ class NodeCacheClient {
   }
   close() {
     const { encrypted, iv, tag } = encryptPlainText(
-      this.secretKey,
+      this.secret,
       'CLOSE',
       '',
       ''

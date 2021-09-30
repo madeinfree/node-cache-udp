@@ -2,8 +2,9 @@ const NCUC = require('./nodeclient')
 
 async function run() {
   const client = await new NCUC({
-    timeout: 80,
+    timeout: 500,
   }).createClient()
+  await client.ping()
   await client.set('CACHE', 'SWAP')
   const s = await client.get('CACHE')
   console.log(s)
