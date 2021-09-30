@@ -63,8 +63,8 @@ function decryptData(
   handshake completed = 0x80 = 10000000
   handshake completed(phase 2) = 0x82 = 10000010
   
-  ECDH iv 16 bytes
-  ECDH tag 16 bytes
+  aes-256-gcm cipher iv 16 bytes
+  aes-256-gcm cipher tag 16 bytes
  */
 
 /**
