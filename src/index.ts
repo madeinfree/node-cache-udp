@@ -181,13 +181,13 @@ class NodeCacheUDP extends EventEmitter {
                 const cHDKey = buffer.slice(1)
                 const dh = crypto.createECDH('secp521r1')
                 const sHDKey = dh.generateKeys()
-                this[kConnections][address + ':' + port].sInfo.secret = crypto
+                connect.sInfo.secret = crypto
                   .createHash('sha256')
                   .update(dh.computeSecret(cHDKey))
                   .digest('hex')
                 responseText =
                   OK + sHDKey.length + '\r\n' + sHDKey.toString('base64')
-                this[kConnections][address + ':' + port].sInfo.phase++
+                connect.sInfo.phase++
               }
             }
             break
