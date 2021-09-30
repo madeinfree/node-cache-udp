@@ -55,10 +55,17 @@ function decryptData(
   return decrypted
 }
 
-// Buffer
-// 1 byte [00000001] handeshake
-// 1 byte [00000000] iv length
-// 1 byte [00000000] auth tag length
+/** 
+  HandShake Flag 1 byte
+  phase = 1 0x1 = 00000001
+  phase = 2 0x2 = 00000010
+  handshake uncomplet = 0x00 = 00000000 
+  handshake completed = 0x80 = 10000000
+  handshake completed(phase 2) = 0x82 = 10000010
+  
+  ECDH iv 16 bytes
+  ECDH tag 16 bytes
+ */
 
 /**
  * Constants
