@@ -6,15 +6,9 @@ interface HandShakeInfo {
   dh: ECDH
   phase: number
 }
-interface LiveInfo {
-  socket: Socket | null
-  ttl: number
-  lastTS: number
-}
 interface Connection {
   rInfo: RemoteInfo
   sInfo: HandShakeInfo
-  lInfo: LiveInfo
 }
 interface Connections {
   [key: string]: Connection

@@ -117,11 +117,6 @@ class NodeCacheUDP extends EventEmitter {
               dh: null,
               phase: 1,
             },
-            lInfo: {
-              socket: null,
-              ttl: 72000,
-              lastTS: new Date().getTime(),
-            },
           }
         }
 
@@ -209,10 +204,7 @@ class NodeCacheUDP extends EventEmitter {
   }
   public bind(port: number = 10923) {
     if (this[kServer]) {
-      this[kServer].bind(port || 10923, () => {
-        this.ttlConnectionsChecker()
-        console.log('[NCU info] run ttl connection checker...')
-      })
+      this[kServer].bind(port || 1092)
     } else {
       throw Error('Node Cache UDP Error: udp server does not create instance.')
     }
@@ -224,26 +216,11 @@ class NodeCacheUDP extends EventEmitter {
       const client = this[kConnections][address + ':' + port]
       if (client) {
         this[kServer].send(Buffer.from(msg), port, address)
-
-        client.lInfo.lastTS = new Date().getTime()
       }
     }
   }
   private handleServerError(err: Error) {
     console.log('server error: \n%s', err.stack)
-  }
-  private ttlConnectionsChecker() {
-    setTimeout(() => {
-      for (let key in this[kConnections]) {
-        const diffTS =
-          new Date().getTime() - this[kConnections][key].lInfo.lastTS
-        if (diffTS > this[kConnections][key].lInfo.ttl) {
-          this[kConnections][key].lInfo.socket.close()
-          delete this[kConnections][key]
-        }
-      }
-      this.ttlConnectionsChecker()
-    }, 10000)
   }
 }
 
