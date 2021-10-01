@@ -1,6 +1,6 @@
 import dgram from 'dgram'
 
-import crypto, { createDecipheriv, createECDH } from 'crypto'
+import crypto, { createDecipheriv } from 'crypto'
 import EventEmitter from 'events'
 
 import type { ECDH } from 'crypto'
@@ -262,13 +262,6 @@ class NodeCacheUDP extends EventEmitter {
       })
     } else {
       throw Error('Node Cache UDP Error: udp server does not create instance.')
-    }
-  }
-  private handleHandShakeInit(connect: Connection) {
-    connect.sInfo.dh = createECDH('secp521r1')
-    const key = connect.sInfo.dh.generateKeys()
-    return {
-      DHKey: key,
     }
   }
   private handleServerResponse(remoteInfo: RemoteInfo, msg: string) {
