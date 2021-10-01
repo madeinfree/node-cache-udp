@@ -223,10 +223,7 @@ class NodeCacheUDP extends EventEmitter {
       const { port, address } = remoteInfo
       const client = this[kConnections][address + ':' + port]
       if (client) {
-        if (!client.lInfo.socket) {
-          client.lInfo.socket = dgram.createSocket('udp4')
-        }
-        client.lInfo.socket.send(Buffer.from(msg), port, address)
+        this[kServer].send(Buffer.from(msg), port, address)
 
         client.lInfo.lastTS = new Date().getTime()
       }
