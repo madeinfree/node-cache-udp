@@ -1,4 +1,4 @@
-const NCUC = require('../client')
+const NCUC = require('../client/node')
 
 async function run() {
   const client = await new NCUC({
