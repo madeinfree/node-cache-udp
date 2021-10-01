@@ -82,11 +82,6 @@ class NodeCacheClient {
       }
     }
   }
-  handShakeLast() {
-    this.sendRequest(
-      Buffer.concat([Buffer.from([0x2]), Buffer.from(this.cKey)])
-    )
-  }
   handleListening() {
     const cInfo = this.address()
     console.log(`client listening ${cInfo.address}:${cInfo.port}`)
