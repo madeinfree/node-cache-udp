@@ -120,7 +120,7 @@ class NodeCacheUDP extends EventEmitter {
           }
         }
 
-        let responseText = ''
+        let packet: string = ''
         switch (op) {
           case HANDSHAKE:
             {
@@ -133,8 +133,7 @@ class NodeCacheUDP extends EventEmitter {
                   .createHash('sha256')
                   .update(dh.computeSecret(cHDKey))
                   .digest('hex')
-                responseText =
-                  OK + sHDKey.length + '\r\n' + sHDKey.toString('base64')
+                packet = OK + sHDKey.length + '\r\n' + sHDKey.toString('base64')
                 connect.sInfo.phase++
               }
             }
@@ -144,24 +143,18 @@ class NodeCacheUDP extends EventEmitter {
               value,
               length: value.length,
             }
-            responseText = encryptPlainText(
-              connect.sInfo.secret,
-              OK + ZERO + 'NULL'
-            )
+            packet = encryptPlainText(connect.sInfo.secret, OK + ZERO + 'NULL')
 
             break
           }
           case DEL: {
             delete this[kCache][key]
-            responseText = encryptPlainText(
-              connect.sInfo.secret,
-              OK + ZERO + 'NULL'
-            )
+            packet = encryptPlainText(connect.sInfo.secret, OK + ZERO + 'NULL')
 
             break
           }
           case GET: {
-            responseText = encryptPlainText(
+            packet = encryptPlainText(
               connect.sInfo.secret,
               OK +
                 (this[kCache][key]
@@ -174,7 +167,7 @@ class NodeCacheUDP extends EventEmitter {
             break
           }
           case PING: {
-            responseText = encryptPlainText(connect.sInfo.secret, OK + PONG)
+            packet = encryptPlainText(connect.sInfo.secret, OK + PONG)
 
             break
           }
@@ -184,7 +177,7 @@ class NodeCacheUDP extends EventEmitter {
             break
           }
           default: {
-            responseText = encryptPlainText(
+            packet = encryptPlainText(
               connect.sInfo.secret,
               ERR +
                 (21 + op.length) +
@@ -197,7 +190,7 @@ class NodeCacheUDP extends EventEmitter {
         }
 
         if (op === CLOSE) return
-        this.emit('response', connect.rInfo, responseText)
+        this.emit('response', connect.rInfo, packet)
       })
       this[kServer] = server
     }
