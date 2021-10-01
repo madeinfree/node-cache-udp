@@ -1,17 +1,17 @@
 import type { ECDH } from 'crypto'
 import type { Socket, RemoteInfo } from 'dgram'
 
-export interface HandShakeInfo {
+interface HandShakeInfo {
   secret: string
   dh: ECDH
   phase: number
 }
-export interface LiveInfo {
+interface LiveInfo {
   socket: Socket | null
   ttl: number
   lastTS: number
 }
-export interface Connection {
+interface Connection {
   rInfo: RemoteInfo
   sInfo: HandShakeInfo
   lInfo: LiveInfo
