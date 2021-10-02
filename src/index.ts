@@ -156,9 +156,19 @@ class NodeCacheUDP extends EventEmitter {
             {
               const phase = buffer[0] & 0x3
               if (phase & 1 && connect.sInfo.phase === 1) {
+                const sign = crypto.createSign('SHA256')
+                sign.update(
+                  Buffer.concat([
+                    this[kConfig].lternPublicKey,
+                    Buffer.from(this[kConfig].ca),
+                  ])
+                )
+                sign.end()
+                const signature = sign.sign(this[kConfig].key)
                 packet = Buffer.concat([
                   Buffer.from([0x1, 0x85]),
                   this[kConfig].lternPublicKey,
+                  signature,
                   Buffer.from(this[kConfig].ca),
                 ])
                 connect.sInfo.phase++

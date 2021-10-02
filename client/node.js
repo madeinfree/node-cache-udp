@@ -71,8 +71,19 @@ class NodeCacheClient {
           const len = buffer[1] & 0xff
           if (status && len) {
             const sPublicKey = buffer.slice(2, 135)
-            const cert = pki.certificateFromPem(buffer.slice(135).toString())
+            const signature = buffer.slice(135, 391)
+            const cert = pki.certificateFromPem(buffer.slice(391).toString())
             const publicKey = pki.publicKeyToPem(cert.publicKey)
+            const verify = crypto.createVerify('SHA256')
+            verify.update(Buffer.concat([sPublicKey, buffer.slice(391)]))
+            verify.end()
+            const isVerify = verify.verify(publicKey, signature)
+            if (!isVerify) {
+              console.warn(
+                '[NCUC certerror]: server certificate signature invalidate'
+              )
+              return
+            }
             const dh = crypto.createECDH('secp521r1')
             dh.generateKeys()
             this.publicKey = dh.getPublicKey()
