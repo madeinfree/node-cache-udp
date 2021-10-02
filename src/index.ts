@@ -3,8 +3,9 @@ import dgram from 'dgram'
 import crypto from 'crypto'
 import EventEmitter from 'events'
 
+import type { ECDH } from 'crypto'
 import type { RemoteInfo } from 'dgram'
-import type { Connections } from './types'
+import type { Connections, ConstructorOptions } from './types'
 
 import { decryptData, encryptPlainText } from './crypto/AES'
 
@@ -20,6 +21,12 @@ import { decryptData, encryptPlainText } from './crypto/AES'
  */
 
 /**
+ * Packet
+ * status 1 byte
+ * public key 12 bytes
+ */
+
+/**
  * Constants
  */
 
@@ -32,11 +39,12 @@ const DEL = 'DEL'
 const GET = 'GET'
 const PING = 'PING'
 const CLOSE = 'CLOSE'
-// PING
-const PONG = '4' + DELIMITER + 'PONG'
 // status
-const OK = 'OK' + DELIMITER
-const ERR = 'ERR' + DELIMITER
+const OK = Buffer.from([0x1])
+const ERR = Buffer.from([0x4])
+// PING
+const PONGB = Buffer.from([0x50, 0x4f, 0x4e, 0x47]) // PONG
+const PONG = Buffer.concat([OK, PONGB])
 // number
 const ZERO = '0' + DELIMITER
 
@@ -44,6 +52,7 @@ const ZERO = '0' + DELIMITER
 const kServer = Symbol('kServer')
 const kCache = Symbol('kCache')
 const kConnections = Symbol('kConnections')
+const kConfig = Symbol('kConfig')
 
 /**
  * record connection from client, ttl is default 72000ms
@@ -52,6 +61,12 @@ const kConnections = Symbol('kConnections')
 
 class NodeCacheUDP extends EventEmitter {
   [kServer]: dgram.Socket | null;
+  [kConfig]: {
+    ca?: string
+    key?: string
+    ecdh: ECDH
+    lternPublicKey: Buffer
+  };
   [kCache]: {
     [key: string]: {
       value: string
@@ -59,15 +74,29 @@ class NodeCacheUDP extends EventEmitter {
     }
   };
   [kConnections]: Connections
-  constructor() {
+  constructor(options: ConstructorOptions = {}) {
     super()
 
     this[kServer] = null
+    this[kConfig] = {
+      ecdh: null,
+      lternPublicKey: null,
+    }
     this[kCache] = {}
-
     this[kConnections] = {}
 
+    this.initServer(options)
+
     this.on('response', this.handleServerResponse)
+  }
+  public initServer(options: ConstructorOptions) {
+    if (options.ca && options.key) {
+      this[kConfig].ca = options.ca
+      this[kConfig].key = options.key
+      this[kConfig].ecdh = crypto.createECDH('secp521r1')
+      this[kConfig].ecdh.generateKeys()
+      this[kConfig].lternPublicKey = this[kConfig].ecdh.getPublicKey()
+    }
   }
   public createServer(callback: (address: string, port: number) => void) {
     if (this[kServer] instanceof dgram.Socket) {
@@ -94,9 +123,6 @@ class NodeCacheUDP extends EventEmitter {
         let op, key, value
 
         const isHandShaked = (buffer[0] & 0x80) > 0
-        if (!isHandShaked) {
-          op = HANDSHAKE
-        }
 
         if (isHandShaked && connect) {
           const iv = buffer.slice(1, 17)
@@ -119,22 +145,35 @@ class NodeCacheUDP extends EventEmitter {
             },
           }
         }
+        if (!isHandShaked) {
+          op = HANDSHAKE
+        }
 
-        let packet: string = ''
+        let packet: string | Buffer = ''
+        let noPacket = false
         switch (op) {
           case HANDSHAKE:
             {
               const phase = buffer[0] & 0x3
-              if (phase === 1 && connect.sInfo.phase === 1) {
-                const cHDKey = buffer.slice(1)
-                const dh = crypto.createECDH('secp521r1')
-                const sHDKey = dh.generateKeys()
+              if (phase & 1 && connect.sInfo.phase === 1) {
+                packet = Buffer.concat([
+                  Buffer.from([0x1, 0x85]),
+                  this[kConfig].lternPublicKey,
+                  Buffer.from(this[kConfig].ca),
+                ])
+                connect.sInfo.phase++
+              }
+              if (phase & 2 && connect.sInfo.phase === 2) {
+                const cipherText = buffer.slice(2)
+                const decrypted = crypto.privateDecrypt(
+                  this[kConfig].key,
+                  cipherText
+                )
                 connect.sInfo.secret = crypto
                   .createHash('sha256')
-                  .update(dh.computeSecret(cHDKey))
+                  .update(this[kConfig].ecdh.computeSecret(decrypted))
                   .digest('hex')
-                packet = OK + sHDKey.length + '\r\n' + sHDKey.toString('base64')
-                connect.sInfo.phase++
+                noPacket = true
               }
             }
             break
@@ -167,19 +206,20 @@ class NodeCacheUDP extends EventEmitter {
             break
           }
           case PING: {
-            packet = encryptPlainText(connect.sInfo.secret, OK + PONG)
+            packet = encryptPlainText(connect.sInfo.secret, 'OK\r\n4\r\nPONG')
 
             break
           }
           case CLOSE: {
             delete this[kConnections][address + ':' + port]
+            noPacket = true
 
             break
           }
           default: {
             packet = encryptPlainText(
               connect.sInfo.secret,
-              ERR +
+              'ERR\r\n' +
                 (21 + op.length) +
                 DELIMITER +
                 `\`${op}\` command not found.`
@@ -188,8 +228,7 @@ class NodeCacheUDP extends EventEmitter {
             break
           }
         }
-
-        if (op === CLOSE) return
+        if (noPacket) return
         this.emit('response', connect.rInfo, packet)
       })
       this[kServer] = server

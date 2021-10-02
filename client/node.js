@@ -1,11 +1,14 @@
 const dgram = require('dgram')
 const crypto = require('crypto')
+const forge = require('node-forge')
 
-function encryptPlainText(secret, op, key, value) {
+const pki = forge.pki
+
+function encryptPlainText(secret, value) {
   const iv = crypto.randomBytes(16)
 
   const cipher = crypto.createCipheriv('aes-256-gcm', secret.slice(0, 32), iv)
-  let encrypted = cipher.update(op + key + value, 'utf8', 'hex')
+  let encrypted = cipher.update(value, 'utf-8', 'hex')
   encrypted += cipher.final('hex')
   const tag = cipher.getAuthTag()
 
@@ -25,9 +28,7 @@ class NodeCacheClient {
     this.timeout = settings?.timeout ?? 10000
 
     this.dhPhase = 1
-    this.dh = null
-    this.cKey = null
-    this.sKey = null
+    this.publicKey = null
     this.secret = null
   }
   createClient() {
@@ -60,23 +61,38 @@ class NodeCacheClient {
     }, this.timeout)
   }
   handShakeInit() {
-    this.dh = crypto.createECDH('secp521r1')
-    const key = this.dh.generateKeys()
-    this.sendRequest(Buffer.concat([Buffer.from([0x1]), key]))
+    this.sendRequest(Buffer.concat([Buffer.from([0x1])]))
   }
   handleHandShake(resolve, buffer) {
-    let [status, _, sHDKey] = buffer.toString().split('\r\n')
-    if (!status === 'OK') throw Error('[NCUC timeout] Handshake error')
     if (this.dhPhase <= 1) {
       switch (this.dhPhase) {
         case 1:
-          this.secret = crypto
-            .createHash('sha256')
-            .update(this.dh.computeSecret(Buffer.from(sHDKey, 'base64')))
-            .digest('hex')
+          const status = buffer[0] & 0x1
+          const len = buffer[1] & 0xff
+          if (status && len) {
+            const sPublicKey = buffer.slice(2, 135)
+            const cert = pki.certificateFromPem(buffer.slice(135).toString())
+            const publicKey = pki.publicKeyToPem(cert.publicKey)
+            const dh = crypto.createECDH('secp521r1')
+            dh.generateKeys()
+            this.publicKey = dh.getPublicKey()
+            this.secret = crypto
+              .createHash('sha256')
+              .update(dh.computeSecret(sPublicKey))
+              .digest('hex')
 
-          this.dhPhase++
-          return resolve(this)
+            const encrypted = crypto.publicEncrypt(publicKey, this.publicKey)
+            const packet = Buffer.concat([
+              Buffer.from([0x02]),
+              Buffer.from([0x0]),
+              Buffer.from(encrypted),
+            ])
+
+            this.sendRequest(packet)
+            this.dhPhase++
+            return resolve(this)
+          }
+          throw new Error('server handshake error')
         default:
           break
       }

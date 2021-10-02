@@ -1,6 +1,10 @@
 import type { ECDH } from 'crypto'
-import type { Socket, RemoteInfo } from 'dgram'
+import type { RemoteInfo } from 'dgram'
 
+interface ConstructorOptions {
+  ca?: string
+  key?: string
+}
 interface HandShakeInfo {
   secret: string
   dh: ECDH
