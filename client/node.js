@@ -4,10 +4,24 @@ const forge = require('node-forge')
 
 const pki = forge.pki
 
+function hash256(data) {
+  return crypto.createHash('sha256').update(data).digest('hex')
+}
+function hmac_sha256(secret, data) {
+  return crypto.createHmac('sha256', secret).update(data).digest('hex')
+}
+/** TODO
+ * ikm = initial key
+ */
+function hkdf(length, ikm, salt) {
+  const prk = hmac_sha256(salt, ikm)
+}
+
 function encryptPlainText(secret, value) {
   const iv = crypto.randomBytes(16)
 
-  const cipher = crypto.createCipheriv('aes-256-gcm', secret.slice(0, 32), iv)
+  const hashKey = hash256(secret).slice(0, 32)
+  const cipher = crypto.createCipheriv('aes-256-gcm', hashKey, iv)
   let encrypted = cipher.update(value, 'utf-8', 'hex')
   encrypted += cipher.final('hex')
   const tag = cipher.getAuthTag()
@@ -117,9 +131,10 @@ class NodeCacheClient {
     let [status, length, msg] = buffer.toString().split('\r\n')
     if (!length && !msg) {
       const [encrypted, iv, tag] = status.split(' ')
+      const hashKey = hash256(this.secret).slice(0, 32)
       const decipher = crypto.createDecipheriv(
         'aes-256-gcm',
-        this.secret.slice(0, 32),
+        hashKey,
         Buffer.from(iv, 'base64')
       )
       decipher.setAuthTag(Buffer.from(tag, 'base64'))
