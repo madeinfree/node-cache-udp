@@ -9,7 +9,6 @@ function verifiyFromCACerts(certsContext, verifyCert) {
   const verifyX509 = new crypto.X509Certificate(verifyCert)
   for (let i = 0; i < certsContext.length; i++) {
     const certX509 = new crypto.X509Certificate(certsContext[i])
-    console.log(verifyX509.checkIssued(certX509))
     if (verifyX509.checkIssued(certX509)) {
       return true
     }
