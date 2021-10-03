@@ -5,6 +5,18 @@ const forge = require('node-forge')
 const pki = forge.pki
 const MACSalt = Buffer.alloc(32).fill(0x0)
 
+function verifiyFromCACerts(certsContext, verifyCert) {
+  const verifyX509 = new crypto.X509Certificate(verifyCert)
+  for (let i = 0; i < certsContext.length; i++) {
+    const certX509 = new crypto.X509Certificate(certsContext[i])
+    console.log(verifyX509.checkIssued(certX509))
+    if (verifyX509.checkIssued(certX509)) {
+      return true
+    }
+  }
+  return false
+}
+
 function hmac_sha256(salt, data) {
   return crypto.createHmac('sha256', salt).update(data).digest('hex')
 }
@@ -30,8 +42,9 @@ class NodeCacheClient {
     this.client = null
     this.port = 10923
 
-    this.host = settings?.host ?? 'localhost'
-    this.timeout = settings?.timeout ?? 10000
+    this.host = settings.host || 'localhost'
+    this.timeout = settings.timeout || 10000
+    this.certsContext = settings.certs ? [...settings.certs] : []
 
     this.dhPhase = 1
     this.publicKey = null
@@ -80,16 +93,22 @@ class NodeCacheClient {
             const signature = buffer.slice(135, 391)
             const cert = pki.certificateFromPem(buffer.slice(391).toString())
             const publicKey = pki.publicKeyToPem(cert.publicKey)
+
             const verify = crypto.createVerify('SHA256')
             verify.update(Buffer.concat([sPublicKey, buffer.slice(391)]))
             verify.end()
             const isVerify = verify.verify(publicKey, signature)
-            if (!isVerify) {
+            const isVerifyCACert = verifiyFromCACerts(
+              this.certsContext,
+              buffer.slice(391).toString()
+            )
+            if (!isVerify || !isVerifyCACert) {
               console.warn(
                 '[NCUC certerror]: server certificate signature invalidate'
               )
               return
             }
+
             const dh = crypto.createECDH('secp521r1')
             dh.generateKeys()
             this.publicKey = dh.getPublicKey()

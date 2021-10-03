@@ -1,7 +1,9 @@
+const fs = require('fs')
 const NCUC = require('../client/node')
 
 async function run() {
   const client = await new NCUC({
+    certs: [fs.readFileSync('./keys/CA/cert.pem')],
     timeout: 500,
   }).createClient()
   await client.ping()
