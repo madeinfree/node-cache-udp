@@ -1,6 +1,5 @@
 import crypto from 'crypto'
 
-export function hash256(data: string): string {
-  const hash = crypto.createHash('sha256').update(data).digest('hex')
-  return hash
+export function MACHash256(salt: Buffer, data: string): string {
+  return crypto.createHmac('sha256', salt).update(data).digest('hex')
 }

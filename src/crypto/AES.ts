@@ -2,12 +2,18 @@ import crypto, { createDecipheriv } from 'crypto'
 
 import type { HandShakeInfo } from '../types'
 
-import { hash256 } from './hash'
+import { MACHash256 } from './hash'
+
+const MACSalt = Buffer.from([
+  0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+  0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+  0x0, 0x0,
+])
 
 export function encryptPlainText(secretKey: string, msg: string) {
   const iv = crypto.randomBytes(16)
 
-  const hashKey = hash256(secretKey).slice(0, 32)
+  const hashKey = MACHash256(MACSalt, secretKey).slice(0, 32)
   const cipher = crypto.createCipheriv('aes-256-gcm', hashKey, iv)
   let encrypted = cipher.update(msg, 'utf8', 'hex')
   encrypted += cipher.final('hex')
@@ -21,7 +27,7 @@ export function decryptData(
   tag: Buffer,
   data: string
 ) {
-  const hashKey = hash256(sInfo.secret).slice(0, 32)
+  const hashKey = MACHash256(MACSalt, sInfo.secret).slice(0, 32)
   const decipher = createDecipheriv('aes-256-gcm', hashKey, iv)
   decipher.setAuthTag(tag)
   let decrypted = decipher.update(data, 'hex', 'utf-8')
